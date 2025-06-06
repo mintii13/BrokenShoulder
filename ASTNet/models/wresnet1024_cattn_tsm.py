@@ -53,7 +53,7 @@ class ASTNet(nn.Module):
         initialize_weights(self.up2, self.up4, self.up8)
         initialize_weights(self.attn2, self.attn4, self.attn8)
         initialize_weights(self.final)
-        self.mem_rep8 = MemModule(mem_dim=10000, fea_dim=2048, shrink_thres =0.0025)
+        self.mem_rep8 = MemModule(mem_dim=200, fea_dim=2048, shrink_thres =0.0025)
         self.mem_rep2 = MemModule(mem_dim=400, fea_dim=256, shrink_thres =0.0025)
         self.mem_rep1 = MemModule(mem_dim=800, fea_dim=128, shrink_thres =0.0025)
     def forward(self, x):
@@ -72,7 +72,9 @@ class ASTNet(nn.Module):
         x8 = x8 + left
         
         res_mem8 = self.mem_rep8(x8)
-        f8 = res_mem8['output']
+        att = []
+        f8, att_8 = res_mem8['output'], res_mem8['att']
+        att.append(att_8)
 
         #res_mem2 = self.mem_rep2(x2)
         #f2 = res_mem2['output']
@@ -92,7 +94,7 @@ class ASTNet(nn.Module):
         x = self.up2(x)
         x = self.attn2(x)
 
-        return self.final(x)
+        return self.final(x), att
 
 class ChannelAttention(nn.Module):
     def __init__(self, input_channels, reduction=16):

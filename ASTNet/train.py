@@ -11,6 +11,7 @@ from utils import train_util, log_util, loss_util, optimizer_util, anomaly_util
 import models as models
 from models.wresnet1024_cattn_tsm import ASTNet as get_net1
 from models.wresnet2048_multiscale_cattn_tsmplus_layer6 import ASTNet as get_net2
+from utils.loss_util import EntropyLossEncap
 import datasets
 
 
@@ -90,18 +91,21 @@ def main():
 
 def train(config, train_loader, model, loss_functions, optimizer, epoch, logger):
     loss_func_mse = nn.MSELoss(reduction='none')
-
+    entropy_loss_func = EntropyLossEncap().to("cuda")
     model.train()
 
     for i, data in enumerate(train_loader):
         # decode input
         inputs, target = train_util.decode_input(input=data, train=True)
-        output = model(inputs)
+        output, att = model(inputs)
+        entropy_loss = 0
+        for att_step in att:
+            entropy_loss += entropy_loss_func(att_step)
 
         # compute loss
         target = target.cuda(non_blocking=True)
         inte_loss, grad_loss, msssim_loss, l2_loss = loss_functions(output, target)
-        loss = inte_loss + grad_loss + msssim_loss + l2_loss
+        loss = inte_loss + grad_loss + msssim_loss + l2_loss + 0.0002*entropy_loss
 
         # compute PSNR
         mse_imgs = torch.mean(loss_func_mse((output + 1) / 2, (target + 1) / 2)).item()
@@ -116,10 +120,10 @@ def train(config, train_loader, model, loss_functions, optimizer, epoch, logger)
         if (i + 1) % config.PRINT_FREQ == 0:
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
                   'Lr {lr:.6f}\t' \
-                  '[inte {inte:.5f} + grad {grad:.4f} + msssim {msssim:.4f} + L2 {l2:.4f}]\t' \
+                  '[inte {inte:.5f} + grad {grad:.4f} + msssim {msssim:.4f} + L2 {l2:.4f} + EL {entropy:.4f}]\t' \
                   'PSNR {psnr:.2f}'.format(epoch+1, i+1, len(train_loader),
                                              lr=cur_lr,
-                                             inte=inte_loss, grad=grad_loss, msssim=msssim_loss, l2=l2_loss,
+                                             inte=inte_loss, grad=grad_loss, msssim=msssim_loss, l2=l2_loss, entropy = entropy_loss,
                                              psnr=psnr)
             logger.info(msg)
 
