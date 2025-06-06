@@ -80,7 +80,8 @@ def main():
 
         scheduler.step()
 
-        if (epoch + 1) % config.SAVE_CHECKPOINT_FREQ == 0:
+        # Skip saving checkpoints for the first 10 epochs
+        if epoch >= 10 and (epoch + 1) % config.SAVE_CHECKPOINT_FREQ == 0:
             logger.info('=> saving model state epoch_{}.pth to {}\n'.format(epoch+1, final_output_dir))
             torch.save(model.module.state_dict(), os.path.join(final_output_dir,
                                                                'epoch_{}.pth'.format(epoch + 1)))
