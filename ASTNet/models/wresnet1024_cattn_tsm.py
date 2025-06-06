@@ -29,8 +29,10 @@ class ASTNet(nn.Module):
         self.conv_x1 = nn.Conv2d(channels[5] * frames, channels[5], kernel_size=1, bias=False)
 
         self.up8 = ConvTransposeBnRelu(channels[1], channels[2], kernel_size=2)   # 2048          -> 1024
-        self.up4 = ConvTransposeBnRelu(channels[2] + channels[4], channels[3], kernel_size=2)   # 1024  +   256 -> 512
-        self.up2 = ConvTransposeBnRelu(channels[3] + channels[5], channels[4], kernel_size=2)   # 512   +   128 -> 256
+        #self.up4 = ConvTransposeBnRelu(channels[2] + channels[4], channels[3], kernel_size=2)   # 1024  +   256 -> 512
+        #self.up2 = ConvTransposeBnRelu(channels[3] + channels[5], channels[4], kernel_size=2)   # 512   +   128 -> 256
+        self.up4 = ConvTransposeBnRelu(channels[2], channels[3], kernel_size=2)   # 1024  +   256 -> 512
+        self.up2 = ConvTransposeBnRelu(channels[3], channels[4], kernel_size=2)   # 512   +   128 -> 256
 
         self.tsm_left = TemporalShift(n_segment=4, n_div=16, direction='left')
 
@@ -51,7 +53,7 @@ class ASTNet(nn.Module):
         initialize_weights(self.up2, self.up4, self.up8)
         initialize_weights(self.attn2, self.attn4, self.attn8)
         initialize_weights(self.final)
-        self.mem_rep8 = MemModule(mem_dim=100, fea_dim=2048, shrink_thres =0.0025)
+        self.mem_rep8 = MemModule(mem_dim=10000, fea_dim=2048, shrink_thres =0.0025)
         self.mem_rep2 = MemModule(mem_dim=400, fea_dim=256, shrink_thres =0.0025)
         self.mem_rep1 = MemModule(mem_dim=800, fea_dim=128, shrink_thres =0.0025)
     def forward(self, x):
@@ -72,20 +74,22 @@ class ASTNet(nn.Module):
         res_mem8 = self.mem_rep8(x8)
         f8 = res_mem8['output']
 
-        res_mem2 = self.mem_rep2(x2)
-        f2 = res_mem2['output']
+        #res_mem2 = self.mem_rep2(x2)
+        #f2 = res_mem2['output']
 
-        res_mem1 = self.mem_rep1(x1)
-        f1 = res_mem1['output']
+        #res_mem1 = self.mem_rep1(x1)
+        #f1 = res_mem1['output']
 
         x = self.up8(f8)
         x = self.up8(x8)
         x = self.attn8(x)
 
-        x = self.up4(torch.cat([f2, x], dim=1))
+        #x = self.up4(torch.cat([f2, x], dim=1))
+        x = self.up4(x)
         x = self.attn4(x)
 
-        x = self.up2(torch.cat([f1, x], dim=1))
+        #x = self.up2(torch.cat([f1, x], dim=1))
+        x = self.up2(x)
         x = self.attn2(x)
 
         return self.final(x)
