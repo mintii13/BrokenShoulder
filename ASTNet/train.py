@@ -74,26 +74,60 @@ def main():
     )
     logger.info('Number videos: {}'.format(len(train_dataset)))
 
+    # Khởi tạo biến để theo dõi model có loss thấp nhất
+    best_loss = float('inf')
+    best_epoch = -1
+    best_model_path = None
+
     last_epoch = config.TRAIN.BEGIN_EPOCH
     for epoch in range(last_epoch, config.TRAIN.END_EPOCH):
-        train(config, train_loader, model, losses, optimizer, epoch, logger)
+        # Train và nhận về average loss của epoch
+        avg_loss = train(config, train_loader, model, losses, optimizer, epoch, logger)
 
         scheduler.step()
 
-        # Skip saving checkpoints for the first 10 epochs
-        if epoch >= 10 and (epoch + 1) % config.SAVE_CHECKPOINT_FREQ == 0:
-            logger.info('=> saving model state epoch_{}.pth to {}\n'.format(epoch+1, final_output_dir))
-            torch.save(model.module.state_dict(), os.path.join(final_output_dir,
-                                                               'epoch_{}.pth'.format(epoch + 1)))
-    final_model_state_file = os.path.join(final_output_dir, 'final_state.pth')
-    logger.info('saving final model state to {}'.format(final_model_state_file))
+        # Kiểm tra và lưu model có loss thấp nhất
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            best_epoch = epoch
+            
+            # Xóa model tốt nhất cũ (nếu có)
+            if best_model_path is not None and os.path.exists(best_model_path):
+                os.remove(best_model_path)
+                logger.info('=> Removed previous best model: {}'.format(best_model_path))
+            
+            # Lưu model tốt nhất mới
+            best_model_path = os.path.join(final_output_dir, 'best_model_epoch_{}_loss_{:.6f}.pth'.format(epoch + 1, avg_loss))
+            torch.save(model.module.state_dict(), best_model_path)
+            logger.info('=> New best model saved at epoch {} with loss {:.6f}: {}'.format(epoch + 1, avg_loss, best_model_path))
+
+        # Lưu checkpoint mỗi 5 epoch
+        if (epoch + 1) % 5 == 0:
+            checkpoint_path = os.path.join(final_output_dir, 'checkpoint_epoch_{}.pth'.format(epoch + 1))
+            torch.save(model.module.state_dict(), checkpoint_path)
+            logger.info('=> Checkpoint saved at epoch {}: {}'.format(epoch + 1, checkpoint_path))
+
+    # Lưu model cuối cùng
+    final_model_state_file = os.path.join(final_output_dir, 'final_state_epoch_{}.pth'.format(config.TRAIN.END_EPOCH))
+    logger.info('=> Saving final model state to {}'.format(final_model_state_file))
     torch.save(model.module.state_dict(), final_model_state_file)
+    
+    # In thông tin tổng kết về model tốt nhất
+    logger.info('=' * 80)
+    logger.info('TRAINING COMPLETED!')
+    logger.info('Best model was saved at epoch {} with loss {:.6f}'.format(best_epoch + 1, best_loss))
+    logger.info('Best model path: {}'.format(best_model_path))
+    logger.info('=' * 80)
 
 
 def train(config, train_loader, model, loss_functions, optimizer, epoch, logger):
     loss_func_mse = nn.MSELoss(reduction='none')
     entropy_loss_func = EntropyLossEncap().to("cuda")
     model.train()
+
+    # Khởi tạo biến để tính average loss
+    total_loss = 0.0
+    num_batches = 0
 
     for i, data in enumerate(train_loader):
         # decode input
@@ -107,6 +141,10 @@ def train(config, train_loader, model, loss_functions, optimizer, epoch, logger)
         target = target.cuda(non_blocking=True)
         inte_loss, grad_loss, msssim_loss, l2_loss = loss_functions(output, target)
         loss = inte_loss + grad_loss + msssim_loss + l2_loss + 0.0002*entropy_loss
+
+        # Cộng dồn loss để tính average
+        total_loss += loss.item()
+        num_batches += 1
 
         # compute PSNR
         mse_imgs = torch.mean(loss_func_mse((output + 1) / 2, (target + 1) / 2)).item()
@@ -127,6 +165,11 @@ def train(config, train_loader, model, loss_functions, optimizer, epoch, logger)
                                              inte=inte_loss, grad=grad_loss, msssim=msssim_loss, l2=l2_loss, entropy = entropy_loss,
                                              psnr=psnr)
             logger.info(msg)
+
+    # Tính và trả về average loss của epoch
+    avg_loss = total_loss / num_batches
+    logger.info('Epoch [{0}] completed. Average Loss: {1:.6f}'.format(epoch + 1, avg_loss))
+    return avg_loss
 
 
 if __name__ == '__main__':

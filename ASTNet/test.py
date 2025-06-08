@@ -1,10 +1,18 @@
+import os
 import pprint
 import argparse
 import tqdm
+import glob
+import time
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
+
+import matplotlib
+matplotlib.use('Agg')  # Không dùng GUI backend
+import matplotlib.pyplot as plt
 
 import datasets
 from utils import train_util, log_util, anomaly_util
@@ -15,15 +23,15 @@ from models.wresnet2048_multiscale_cattn_tsmplus_layer6 import ASTNet as get_net
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-# --cfg experiments/sha/sha_wresnet.yaml --model-file output/shanghai/sha_wresnet/shanghai.pth GPUS [3]
-# --cfg experiments/ped2/ped2_wresnet.yaml --model-file output/ped2/ped2_wresnet/ped2.pth GPUS [3]
 def parse_args():
-    parser = argparse.ArgumentParser(description='Test Anomaly Detection')
+    parser = argparse.ArgumentParser(description='Batch Test Anomaly Detection')
 
     parser.add_argument('--cfg', help='experiment configuration filename',
-                        default='config/shanghaitech_wresnet.yaml', type=str)
-    parser.add_argument('--model-file', help='model parameters',
-                        default='D:/FPTU-sourse/Term4/ResFes_FE/References/Anomaly Detection/Reconstruction/astnet/ASTNet/output/ped2/ped2_wresnet/epoch_8.pth', type=str)
+                        default='config/ped2_wresnet.yaml', type=str)
+    parser.add_argument('--base-path', help='base path for batch testing',
+                        default='D:/FPTU-sourse/Term4/ResFes_FE/References/Anomaly Detection/Reconstruction/astnet/ASTNet/output/ped2/1mem_newloss/', type=str)
+    parser.add_argument('--epoch-range', help='epoch range for batch testing (e.g., 32-36 or 32 for single epoch)', 
+                        default='11-44', type=str)
 
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
@@ -33,6 +41,354 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def inference(config, data_loader, model, save_frames_info=None, epoch_info=None):
+    """Enhanced inference with frame information saving"""
+    loss_func_mse = nn.MSELoss(reduction='none')
+
+    model.eval()
+    psnr_list = []
+    ef = config.MODEL.ENCODED_FRAMES
+    df = config.MODEL.DECODED_FRAMES
+    fp = ef + df  # number of frames to process
+    
+    with torch.no_grad():
+        for i, data in enumerate(data_loader):
+            print('[{}/{}]'.format(i+1, len(data_loader)))
+            psnr_video = []
+
+            # compute the output
+            video, video_name = train_util.decode_input(input=data, train=False)
+            video = [frame.to(device=config.GPUS[0]) for frame in video]
+            
+            for f in tqdm.tqdm(range(len(video) - fp)):
+                inputs = video[f:f + fp]
+                output = model(inputs)
+                target = video[f + fp:f + fp + 1][0]
+
+                # compute PSNR for each frame
+                mse_imgs = torch.mean(loss_func_mse((output[0] + 1) / 2, (target[0] + 1) / 2)).item()
+                psnr = anomaly_util.psnr_park(mse_imgs)
+                psnr_video.append(psnr)
+                
+                # Store frame information for visualization if requested
+                # Only save every 10th frame (f % 10 == 0) and only for first video
+                if save_frames_info is not None and i == 0 and f % 10 == 0:
+                    frame_key = f"video_{i}_frame_{f + fp}"
+                    save_frames_info[frame_key] = {
+                        'video_idx': i,
+                        'frame_idx': f + fp,
+                        'psnr': psnr,
+                        'target': (target[0] + 1) / 2,  # Convert back to [0,1]
+                        'predicted': (output[0] + 1) / 2,  # Convert back to [0,1]
+                        'video_name': video_name[0] if isinstance(video_name, list) else video_name
+                    }
+
+            psnr_list.append(psnr_video)
+    return psnr_list
+
+def save_frame_comparison(target_frame, predicted_frame, video_idx, frame_idx, psnr_value, base_path, epoch_info, logger):
+    """Save comparison of target and predicted frames"""
+    try:
+        # Create epoch-specific folder for comparison images
+        epoch_folder_name = f"compare_image_{epoch_info}"
+        epoch_folder_path = os.path.join(base_path, epoch_folder_name)
+        
+        # Create folder if it doesn't exist
+        if not os.path.exists(epoch_folder_path):
+            os.makedirs(epoch_folder_path)
+            logger.info(f'Created folder: {epoch_folder_path}')
+        
+        # Convert tensor to numpy array for visualization
+        target_np = target_frame.cpu().detach().squeeze().numpy()
+        predicted_np = predicted_frame.cpu().detach().squeeze().numpy()
+        
+        # Handle different tensor shapes
+        if len(target_np.shape) == 3:  # [C, H, W]
+            if target_np.shape[0] == 3:  # RGB
+                target_np = np.transpose(target_np, (1, 2, 0))
+                predicted_np = np.transpose(predicted_np, (1, 2, 0))
+            elif target_np.shape[0] == 1:  # Grayscale with channel dimension
+                target_np = target_np.squeeze(0)
+                predicted_np = predicted_np.squeeze(0)
+        
+        # Ensure values are in [0, 1] range
+        target_np = np.clip(target_np, 0, 1)
+        predicted_np = np.clip(predicted_np, 0, 1)
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        
+        # Plot original frame
+        if len(target_np.shape) == 3:  # Color image
+            axes[0].imshow(target_np)
+        else:  # Grayscale image
+            axes[0].imshow(target_np, cmap='gray')
+        axes[0].set_title(f'Original Frame\nVideo {video_idx+1}, Frame {frame_idx}, {epoch_info}')
+        axes[0].axis('off')
+        
+        # Plot predicted frame
+        if len(predicted_np.shape) == 3:  # Color image
+            axes[1].imshow(predicted_np)
+        else:  # Grayscale image
+            axes[1].imshow(predicted_np, cmap='gray')
+        axes[1].set_title(f'Predicted Frame\nPSNR: {psnr_value:.2f}, {epoch_info}')
+        axes[1].axis('off')
+        
+        # Add main title
+        plt.suptitle(f'Frame Comparison Video {video_idx+1} Frame {frame_idx} - {epoch_info}', fontsize=16)
+        plt.tight_layout()
+        
+        # Save figure in epoch-specific folder
+        filename = f'FRAME_COMPARISON_video{video_idx+1}_frame{frame_idx}_psnr{psnr_value:.2f}.png'
+        save_path = os.path.join(epoch_folder_path, filename)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        logger.info(f'Saved frame comparison to: {save_path}')
+        
+    except Exception as e:
+        logger.error(f'Error saving frame comparison: {str(e)}')
+
+def save_all_frames_video1(frames_info, base_path, epoch_info, logger):
+    """Save frame comparisons for selected frames of video 1 (every 10th frame)"""
+    if not frames_info:
+        logger.warning("No frame information available for visualization")
+        return
+    
+    # Filter frames for video 1 (video_idx = 0)
+    video1_frames = {}
+    for frame_key, frame_data in frames_info.items():
+        if frame_data['video_idx'] == 0:  # Video 1 has index 0
+            video1_frames[frame_data['frame_idx']] = frame_data
+    
+    if not video1_frames:
+        logger.warning("No frames found for video 1")
+        return
+    
+    logger.info(f"Found {len(video1_frames)} frames for video 1")
+    
+    # Sort frames by frame index
+    sorted_frame_indices = sorted(video1_frames.keys())
+    
+    # Save comparison for each frame
+    for frame_idx in sorted_frame_indices:
+        frame_data = video1_frames[frame_idx]
+        logger.info(f"Saving frame comparison for Video 1, Frame {frame_idx}, PSNR: {frame_data['psnr']:.2f}")
+        
+        save_frame_comparison(
+            frame_data['target'],
+            frame_data['predicted'],
+            frame_data['video_idx'],
+            frame_data['frame_idx'],
+            frame_data['psnr'],
+            base_path,
+            epoch_info,
+            logger
+        )
+
+def plot_regularity_score(psnr_values, gt_labels, video_idx, epoch_name, base_path, logger):
+    """Plot and save regularity score visualization for a specific video"""
+    plt.figure(figsize=(12, 6))
+    
+    # Plot PSNR values (regularity score)
+    plt.plot(psnr_values, 'b-', label='Regularity Score (PSNR)')
+    
+    # Create second y-axis for ground truth
+    ax2 = plt.twinx()
+    ax2.plot(gt_labels, 'r-', label='Ground Truth')
+    ax2.set_ylim([-0.1, 1.1])
+    ax2.set_ylabel('Anomaly (1 = anomalous)')
+    
+    plt.title(f'Regularity Score - Video {video_idx + 1} - {epoch_name}')
+    plt.xlabel('Frame Number')
+    plt.ylabel('Regularity Score (PSNR)')
+    
+    # Add separate legends for both axes
+    plt.legend(loc='upper left')      # Legend for primary axis (PSNR)
+    ax2.legend(loc='upper right')     # Legend for secondary axis (Ground Truth)
+    
+    plt.grid(True)
+    plt.tight_layout()
+    
+    # Save figure to base path with clear naming
+    filename = f'PSNR_PLOT_regularity_video{video_idx + 1}_{epoch_name}.png'
+    save_path = os.path.join(base_path, filename)
+    plt.savefig(save_path)
+    logger.info(f'Saved regularity score plot to: {save_path}')
+    plt.close()  # Close the figure to free memory
+
+def test_single_model(model_path, config, logger, save_visualizations=False, base_path=None, epoch_info=None):
+    """Test a single model and return its metrics"""
+    logger.info(f'Testing model: {os.path.basename(model_path)}')
+    
+    config.defrost()
+    config.MODEL.INIT_WEIGHTS = False
+    config.freeze()
+
+    gpus = [(config.GPUS[0])]
+    
+    # Create model based on dataset
+    if config.DATASET.DATASET == "ped2":
+        model = get_net1(config, pretrained=False)
+    else:
+        model = get_net2(config, pretrained=False)
+        
+    logger.info('Model: {}'.format(model.get_name()))
+    model = nn.DataParallel(model, device_ids=gpus).cuda(device=gpus[0])
+
+    # Load model with error handling for size mismatch
+    try:
+        state_dict = torch.load(model_path, map_location='cuda')
+        if 'state_dict' in state_dict.keys():
+            state_dict = state_dict['state_dict']
+            model.load_state_dict(state_dict)
+        else:
+            model.module.load_state_dict(state_dict)
+        logger.info(f"Successfully loaded model: {os.path.basename(model_path)}")
+    except RuntimeError as e:
+        if "size mismatch" in str(e):
+            logger.error(f"Model architecture mismatch for {os.path.basename(model_path)}")
+            logger.error(f"Error details: {str(e)}")
+            logger.error("Please check if the model was trained with the same configuration")
+            raise e
+        else:
+            raise e
+
+    # Get test data
+    test_dataset = eval('datasets.get_test_data')(config)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=config.TEST.BATCH_SIZE_PER_GPU * len(gpus),
+        shuffle=False,
+        num_workers=config.WORKERS,
+        pin_memory=True
+    )
+
+    # Load ground truth
+    mat_loader = datasets.get_label(config)
+    mat = mat_loader()
+
+    # Dictionary to store frame information for visualization
+    frames_info = {} if save_visualizations else None
+
+    # Run inference
+    psnr_list = inference(config, test_loader, model, frames_info, epoch_info)
+    assert len(psnr_list) == len(mat), f'Ground truth has {len(mat)} videos, BUT got {len(psnr_list)} detected videos!'
+
+    # Calculate AUC
+    auc, fpr, tpr = anomaly_util.calculate_auc(config, psnr_list, mat)
+    logger.info(f'AUC: {auc * 100:.1f}%')
+
+    # Save visualizations if requested
+    if save_visualizations and base_path and epoch_info:
+        # Save frame comparisons for video 1 (every 10th frame)
+        save_all_frames_video1(frames_info, base_path, epoch_info, logger)
+        
+        # Plot regularity scores for first 3 videos
+        for video_idx in range(min(3, len(psnr_list))):
+            plot_regularity_score(
+                psnr_list[video_idx], 
+                mat[video_idx], 
+                video_idx,
+                epoch_info,
+                base_path,
+                logger
+            )
+
+    return auc, psnr_list, mat
+
+def parse_epoch_range(epoch_range):
+    """Parse epoch range string to return start and end epochs"""
+    if '-' in epoch_range:
+        # Range format: "32-36"
+        start_epoch, end_epoch = map(int, epoch_range.split('-'))
+        return start_epoch, end_epoch
+    else:
+        # Single epoch format: "32"
+        epoch = int(epoch_range)
+        return epoch, epoch
+
+def batch_test_models(base_path, epoch_range, config, logger):
+    """Test multiple models in batch mode"""
+    logger.info(f"Starting batch testing in: {base_path}")
+    logger.info(f"Epoch range: {epoch_range}")
+    
+    # Parse epoch range
+    start_epoch, end_epoch = parse_epoch_range(epoch_range)
+    
+    # Get list of model files
+    model_files = []
+    for epoch in range(start_epoch, end_epoch + 1):
+        model_path = os.path.join(base_path, f"epoch_{epoch}.pth")
+        if os.path.exists(model_path):
+            model_files.append(model_path)
+        else:
+            logger.warning(f"Model file not found: {model_path}")
+    
+    if not model_files:
+        logger.error("No model files found!")
+        return
+    
+    logger.info(f"Found {len(model_files)} model files: {[os.path.basename(f) for f in model_files]}")
+    logger.info(f"All output files will be saved to: {base_path}")
+    
+    # Dictionary to store results
+    results = {}
+    psnr_results = {}
+    gt_labels_store = None
+    
+    # Test each model
+    for model_path in model_files:
+        model_name = os.path.basename(model_path)
+        epoch_info = model_name.replace('.pth', '').replace('_', '')
+        
+        try:
+            start_time = time.time()
+            auc, psnr_list, gt_labels = test_single_model(
+                model_path, config, logger, 
+                save_visualizations=True, 
+                base_path=base_path, 
+                epoch_info=epoch_info
+            )
+            end_time = time.time()
+            
+            results[model_name] = {"auc": auc}
+            psnr_results[model_name] = psnr_list
+            
+            # Store ground truth labels (should be the same for all models)
+            if gt_labels_store is None:
+                gt_labels_store = gt_labels
+            
+            logger.info(f"Completed {model_name} in {end_time - start_time:.2f} seconds")
+            
+        except Exception as e:
+            logger.error(f"Error testing model {model_name}: {str(e)}")
+            results[model_name] = {"auc": None}
+    
+    # Print and save final results
+    logger.info("\n=== FINAL RESULTS ===")
+    sorted_results = sorted(results.items(), key=lambda x: -1 if x[1]["auc"] is None else x[1]["auc"], reverse=True)
+    
+    for model_name, metrics in sorted_results:
+        if metrics["auc"] is not None:
+            logger.info(f"{model_name}: AUC = {metrics['auc'] * 100:.1f}%")
+        else:
+            logger.info(f"{model_name}: Failed to test")
+    
+    # Save results to file
+    results_filename = f"TEST_RESULTS_model_metrics_results_epoch{epoch_range}.txt"
+    results_file = os.path.join(base_path, results_filename)
+    with open(results_file, 'w') as f:
+        f.write("=== MODEL METRICS RESULTS ===\n")
+        f.write("Model Name, AUC (%)\n")
+        for model_name, metrics in sorted_results:
+            if metrics["auc"] is not None:
+                f.write(f"{model_name}: AUC = {metrics['auc'] * 100:.1f}%\n")
+            else:
+                f.write(f"{model_name}: Failed to test\n")
+    
+    logger.info(f"Test results saved to: {results_file}")
+    logger.info(f"All files saved in base path: {base_path}")
 
 def main():
     args = parse_args()
@@ -48,112 +404,8 @@ def main():
     cudnn.determinstic = config.CUDNN.DETERMINISTIC
     cudnn.enabled = config.CUDNN.ENABLED
 
-    config.defrost()
-    config.MODEL.INIT_WEIGHTS = False       # TODO ? False
-    config.freeze()
-
-    gpus = [(config.GPUS[0])]
-    # model = models.get_net(config)
-    if config.DATASET.DATASET == "ped2":
-        model = get_net1(config, pretrained=False)
-    else:
-        model = get_net2(config, pretrained=False)
-    logger.info('Model: {}'.format(model.get_name()))
-    model = nn.DataParallel(model, device_ids=gpus).cuda(device=gpus[0])
-    logger.info('Epoch: '.format(args.model_file))
-
-    # load model
-    state_dict = torch.load(args.model_file)
-    if 'state_dict' in state_dict.keys():
-        state_dict = state_dict['state_dict']
-        model.load_state_dict(state_dict)
-    else:
-        model.module.load_state_dict(state_dict)
-
-    test_dataset = eval('datasets.get_test_data')(config)
-
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=config.TEST.BATCH_SIZE_PER_GPU * len(gpus),
-        shuffle=False,
-        num_workers=config.WORKERS,
-        pin_memory=True
-    )
-
-    mat_loader = datasets.get_label(config)
-    mat = mat_loader()
-
-    psnr_list = inference(config, test_loader, model)
-    assert len(psnr_list) == len(mat), f'Ground truth has {len(mat)} videos, BUT got {len(psnr_list)} detected videos!'
-
-    auc, fpr, tpr = anomaly_util.calculate_auc(config, psnr_list, mat)
-    print(psnr_list)
-    logger.info(f'AUC: {auc * 100:.1f}%')
-
-
-def inference(config, data_loader, model):
-    loss_func_mse = nn.MSELoss(reduction='none')
-
-    model.eval()
-    psnr_list = []
-    ef = config.MODEL.ENCODED_FRAMES
-    df = config.MODEL.DECODED_FRAMES
-    fp = ef + df  # number of frames to process
-    with torch.no_grad():
-        for i, data in enumerate(data_loader):
-            print('[{}/{}]'.format(i+1, len(data_loader)))
-            psnr_video = []
-
-            # compute the output
-            video, video_name = train_util.decode_input(input=data, train=False)
-            video = [frame.to(device=config.GPUS[0]) for frame in video]
-            for f in tqdm.tqdm(range(len(video) - fp)):
-                inputs = video[f:f + fp]
-                output = model(inputs)
-                target = video[f + fp:f + fp + 1][0]
-
-                # compute PSNR for each frame
-                # https://github.com/cvlab-yonsei/MNAD/blob/d6d1e446e0ed80765b100d92e24f5ab472d27cc3/utils.py#L20
-                mse_imgs = torch.mean(loss_func_mse((output[0] + 1) / 2, (target[0] + 1) / 2)).item()
-                psnr = anomaly_util.psnr_park(mse_imgs)
-                psnr_video.append(psnr)
-
-            psnr_list.append(psnr_video)
-    return psnr_list
-
-
-
-
-import matplotlib.pyplot as plt
-def plot_regularity_score(psnr_values, gt_labels, video_idx, epoch_name):
-    plt.figure(figsize=(12, 6))
-    
-    # Plot PSNR values (regularity score)
-    plt.plot(psnr_values, 'b-', label='Regularity Score (PSNR)')
-    
-    # Tạo trục y thứ hai cho ground truth
-    ax2 = plt.twinx()
-    ax2.plot(gt_labels, 'r-', label='Ground Truth')
-    ax2.set_ylim([-0.1, 1.1])
-    ax2.set_ylabel('Anomaly (1 = anomalous)')
-    
-    plt.title(f'Regularity Score - Video {video_idx + 1} - {epoch_name}')
-    plt.xlabel('Frame Number')
-    plt.ylabel('Regularity Score (PSNR)')
-    
-    # Kết hợp legend
-    lines1, labels1 = plt.gca().get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-    
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f'regularity_video{video_idx + 1}_{epoch_name}.png')
-    plt.show()
+    # Only batch testing mode
+    batch_test_models(args.base_path, args.epoch_range, config, logger)
 
 if __name__ == '__main__':
     main()
-    # mat_loader = datasets.get_label(config)
-    # mat = mat_loader()
-    # psnr = [34.87209515742202, 35.088338116535304, 34.95834550697249, 35.12151408551995, 35.334627897744625, 35.13821265467967, 35.064983921991754, 35.17008454073597, 34.66563941669558, 35.035528116467766, 35.088825192786814, 35.103113789866555, 34.88422235538026, 35.218789018013986, 35.10881954843298, 35.133066555134576, 35.25958012623931, 35.20126169726089, 35.0622591095916, 35.04499241457887, 35.02634376596514, 35.174079666441386, 35.06232074170264, 34.89109146107284, 35.04058366510755, 34.97299655817999, 35.17127932479283, 34.91456627448549, 35.077538986158615, 35.068996782736214, 35.300564385502234, 34.993390912929925, 34.94340677748702, 35.18215723795143, 35.13587205023977, 35.089443295314965, 35.283863349552874, 34.90932327596842, 34.78099188343299, 34.774041126935586, 35.17410171699014, 35.10698466381612, 35.257347085226975, 35.08969586549283, 34.881870754744504, 34.96907892877382, 35.46609375124123, 35.26118349934799, 35.27531476307908, 35.43609137916598, 35.04322708585237, 34.90507312804657, 34.96929601913278, 34.97282535854712, 34.79458983381778, 35.08498065339568, 34.4282185256782, 34.94170433890869, 34.91370414864116, 34.78462928527812, 34.97668474819717, 35.034027262260764, 35.22482316089695, 34.98354728621009, 35.09463964957165, 34.83880954395831, 34.691733331412635, 34.736586946929165, 34.956763047201946, 34.90461678670518, 35.10817901269057, 34.987375568721426, 35.016531974933926, 34.620175267113204, 34.440731926413896, 34.5881992151171, 34.52123925984792, 34.38612227474148, 34.32033956162022, 34.39967763800061, 33.9778006294564, 34.082916691396925, 34.503468326251415, 34.413212589501796, 34.48244055271607, 34.481112754888166, 34.4743201313313, 34.40326314045021, 34.35027730001175, 34.37694028764659, 34.63532947128941, 34.341857641864806, 34.1840647854408, 34.324493699363366, 34.66478979067138, 34.552581876876786, 34.47233920868408, 34.24712482377052, 34.48831994972985, 34.41590144872325, 34.334145820184865, 34.360060085326495, 34.3449814767273, 34.16597316927734, 33.86656467540371, 33.87336135586785, 33.89106507976676, 34.00451780838318, 34.21042542706938, 34.23239141716, 34.27331461753715, 34.13362074585319, 34.17406990850588, 34.18427612081008, 34.346075057731326, 34.24743638417394, 33.923823473041374, 34.19189569704457, 34.405310739598164, 34.370883559053816, 34.44782167900425, 34.29322654782352, 34.26298292901464, 34.18718783188921, 34.2303109017903, 34.078036435946984, 33.855958317185774, 33.88834646347042, 33.570512155247144, 33.710366532069315, 33.69263415723028, 33.80265170385407, 33.96233109600829, 34.03075058643973, 34.038646933678066, 33.7521509750501, 33.680074632054804, 33.85264466608676, 33.86363765945702, 33.76429724831861, 33.46126354510832, 33.527089854169034, 33.63816487218602, 33.558153556681226, 33.38949911450075, 33.48898350015552, 33.594382687765304, 33.53053824535367, 33.52222529044115, 33.435951644320355, 33.476154480881874, 33.48144101481948, 33.14888774823697, 33.24857437992747, 33.40190888639847, 33.42680221032118, 33.459231574244384, 33.27097985329872, 33.22581340639031, 33.17320634174791, 33.2383602709479, 33.002477305550876, 33.1690232471548, 33.175381064604906, 32.81703038453513, 33.17379323111404, 33.01218953370687, 32.873511556613465, 32.94777328501803, 32.8167566874051, 33.10981666862473, 33.04003824050855, 33.23313062151535, 33.008920227215434, 33.20595266262652, 33.22719236778477]
-    # plot_regularity_score(psnr,mat[0],0,"epoch8")
