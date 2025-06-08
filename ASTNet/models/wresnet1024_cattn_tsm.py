@@ -53,7 +53,7 @@ class ASTNet(nn.Module):
         initialize_weights(self.up2, self.up4, self.up8)
         initialize_weights(self.attn2, self.attn4, self.attn8)
         initialize_weights(self.final)
-        self.mem_rep8 = MemModule(mem_dim=2000, fea_dim=2048, shrink_thres =0.0025)
+        self.mem_rep8 = MemModule(mem_dim=200, fea_dim=2048, shrink_thres =0.0025)
         self.mem_rep2 = MemModule(mem_dim=400, fea_dim=256, shrink_thres =0.0025)
         self.mem_rep1 = MemModule(mem_dim=800, fea_dim=128, shrink_thres =0.0025)
     def forward(self, x):
