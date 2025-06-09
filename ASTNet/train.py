@@ -31,6 +31,24 @@ def parse_args():
     update_config(config, args)
     return args
 
+def print_mem_dim(model, logger):
+    """Print memory dimensions of MemModules"""
+    # Get the actual model (unwrap DataParallel if needed)
+    actual_model = model.module if hasattr(model, 'module') else model
+    
+    logger.info("=== Memory Dimensions ===")
+    
+    if hasattr(actual_model, 'mem_rep8'):
+        logger.info(f"mem_rep8 dim: {actual_model.mem_rep8.mem_dim}")
+    
+    if hasattr(actual_model, 'mem_rep2'):
+        logger.info(f"mem_rep2 dim: {actual_model.mem_rep2.mem_dim}")
+    
+    if hasattr(actual_model, 'mem_rep1'):
+        logger.info(f"mem_rep1 dim: {actual_model.mem_rep1.mem_dim}")
+    
+    logger.info("=" * 25)
+
 
 def main():
     args = parse_args()
@@ -51,6 +69,7 @@ def main():
         model = get_net2(config)
 
     logger.info('Model: {}'.format(model.get_name()))
+    print_mem_dim(model, logger)
 
     gpus = list(config.GPUS)
     model = nn.DataParallel(model, device_ids=gpus).cuda()
