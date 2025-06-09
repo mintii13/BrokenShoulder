@@ -377,7 +377,7 @@ def batch_test_models(base_path, epoch_range, config, logger):
     
     # Save results to file
     results_filename = f"TEST_RESULTS_model_metrics_results_epoch{epoch_range}.txt"
-    results_file = os.path.join(base_path, results_filename)
+    results_file = os.path.join('/kaggle/working/', results_filename)
     with open(results_file, 'w') as f:
         f.write("=== MODEL METRICS RESULTS ===\n")
         f.write("Model Name, AUC (%)\n")
