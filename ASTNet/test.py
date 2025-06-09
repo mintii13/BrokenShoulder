@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument('--cfg', help='experiment configuration filename',
                         default='config/ped2_wresnet.yaml', type=str)
     parser.add_argument('--base-path', help='base path for batch testing',
-                        default='D:/FPTU-sourse/Term4/ResFes_FE/References/Anomaly Detection/Reconstruction/astnet/ASTNet/output/ped2/1mem_newloss/', type=str)
+                        default='/kaggle/input/final-test/', type=str)
     parser.add_argument('--epoch-range', help='epoch range for batch testing (e.g., 32-36 or 32 for single epoch)', 
                         default='11-44', type=str)
 
