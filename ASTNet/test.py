@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--base-path', help='base path for batch testing',
                         default='/kaggle/input/final-test/', type=str)
     parser.add_argument('--epoch-range', help='epoch range for batch testing (e.g., 32-36 or 32 for single epoch)', 
-                        default='11-44', type=str)
+                        default='11-61', type=str)
 
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
@@ -319,7 +319,7 @@ def batch_test_models(base_path, epoch_range, config, logger):
     # Get list of model files
     model_files = []
     for epoch in range(start_epoch, end_epoch + 1):
-        model_path = os.path.join(base_path, f"epoch_{epoch}.pth")
+        model_path = os.path.join(base_path, f"final_state_epoch_{epoch}.pth")
         if os.path.exists(model_path):
             model_files.append(model_path)
         else:
