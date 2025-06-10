@@ -24,7 +24,7 @@ TEST:
   BATCH_SIZE_PER_GPU: 1
 
 MODEL:
-  NAME: "wrn38"
+  NAME: "wrn20"
   INIT_WEIGHTS: False
   PRETRAINED: '..\..\datasets\seg_weights\wider_resnet38.pth.tar'
   IMAGE_SIZE:
