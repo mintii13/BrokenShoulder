@@ -36,9 +36,9 @@ class ASTNet(nn.Module):
 
         self.tsm_left = TemporalShift(n_segment=4, n_div=16, direction='left')
 
-        self.attn8 = ChannelAttention(channels[2])
-        self.attn4 = ChannelAttention(channels[3])
-        self.attn2 = ChannelAttention(channels[4])
+        # self.attn8 = ChannelAttention(channels[2])
+        # self.attn4 = ChannelAttention(channels[3])
+        # self.attn2 = ChannelAttention(channels[4])
 
         self.final = nn.Sequential(
             ConvBnRelu(channels[4], channels[5], kernel_size=1, padding=0),
@@ -51,11 +51,11 @@ class ASTNet(nn.Module):
 
         initialize_weights(self.conv_x1, self.conv_x2, self.conv_x8)
         initialize_weights(self.up2, self.up4, self.up8)
-        initialize_weights(self.attn2, self.attn4, self.attn8)
+        # initialize_weights(self.attn2, self.attn4, self.attn8)
         initialize_weights(self.final)
-        self.mem_rep8 = MemModule(mem_dim=10000, fea_dim=2048, shrink_thres =0.0025)
-        self.mem_rep2 = MemModule(mem_dim=400, fea_dim=256, shrink_thres =0.0025)
-        self.mem_rep1 = MemModule(mem_dim=800, fea_dim=128, shrink_thres =0.0025)
+        self.mem_rep8 = MemModule(mem_dim=2000, fea_dim=2048, shrink_thres =0.0025)
+        # self.mem_rep2 = MemModule(mem_dim=400, fea_dim=256, shrink_thres =0.0025)
+        # self.mem_rep1 = MemModule(mem_dim=800, fea_dim=128, shrink_thres =0.0025)
     def forward(self, x):
         x1s, x2s, x8s = [], [], []
         for xi in x:
@@ -84,15 +84,15 @@ class ASTNet(nn.Module):
 
         x = self.up8(f8)
         x = self.up8(x8)
-        x = self.attn8(x)
+        #x = self.attn8(x)
 
         #x = self.up4(torch.cat([f2, x], dim=1))
         x = self.up4(x)
-        x = self.attn4(x)
+        #x = self.attn4(x)
 
         #x = self.up2(torch.cat([f1, x], dim=1))
         x = self.up2(x)
-        x = self.attn2(x)
+        #x = self.attn2(x)
 
         return self.final(x), att
 
