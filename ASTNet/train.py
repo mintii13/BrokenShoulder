@@ -138,7 +138,7 @@ def main():
     logger.info('Best model path: {}'.format(best_model_path))
     logger.info('=' * 80)
 
-def compute_contrastive_loss(processed_output, att_weights, mem_fea_align, temperature=0.07):
+def compute_contrastive_loss(processed_output, att_weights, mem_fea_align, temperature=0.2):
     """
     Simple contrastive loss:
     - Positive: similarity between query and most_similar_idx memory
@@ -191,7 +191,7 @@ def compute_contrastive_loss(processed_output, att_weights, mem_fea_align, tempe
     
     return contrastive_loss
 
-def compute_contrastive_loss_isolated(processed_output, att_weights, mem_fea_align, temperature=0.07):
+def compute_contrastive_loss_isolated(processed_output, att_weights, mem_fea_align, temperature=0.2):
     """
         Contrastive loss with isolated gradient flow
         
