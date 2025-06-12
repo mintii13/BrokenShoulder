@@ -28,20 +28,21 @@ class MemoryUnit(nn.Module):
     def forward(self, input):
         input = F.normalize(input, dim=1)
         weight_normal = F.normalize(self.weight, dim=1)
-        att_weight = F.linear(input, weight_normal)  # Fea x Mem^T, (TxC) x (CxM) = TxM
-        att_weight = att_weight.abs()
-        #att_weight = F.softmax(att_weight, dim=1)  # TxM
+        att_weight = F.linear(input, weight_normal)  # Fea x Mem^T, (TxC) x (CxM) = TxM, T = number of pixels
+        mem_fea_align = F.linear(weight_normal, weight_normal) #(MxC) x (CxM) = MxM
+        #att_weight = att_weight.abs()
+        att_weight = F.softmax(att_weight, dim=1)  # TxM có softmax nè
         # ReLU based shrinkage, hard shrinkage for positive value
-        if(self.shrink_thres>0):
-            att_weight = hard_shrink_relu(att_weight, lambd=self.shrink_thres)
+        #if(self.shrink_thres>0):
+            #att_weight = hard_shrink_relu(att_weight, lambd=self.shrink_thres)
             # att_weight = F.softshrink(att_weight, lambd=self.shrink_thres)
             # normalize???
-            att_weight = F.normalize(att_weight, p=1, dim=1)
+            #att_weight = F.normalize(att_weight, p=1, dim=1)
             # att_weight = F.softmax(att_weight, dim=1)
             # att_weight = self.hard_sparse_shrink_opt(att_weight)
         mem_trans = self.weight.permute(1, 0)  # Mem^T, MxC
         output = F.linear(att_weight, mem_trans)  # AttWeight x Mem^T^T = AW x Mem, (TxM) x (MxC) = TxC
-        return {'output': output, 'att': att_weight}  # output, att_weight
+        return {'output': output, 'att': att_weight, 'mem_fea_align': mem_fea_align}  # output, att_weight, mem_fea_align
 
     def extra_repr(self):
         return 'mem_dim={}, fea_dim={}'.format(
@@ -78,6 +79,7 @@ class MemModule(nn.Module):
         #
         y = y_and['output']
         att = y_and['att']
+        mem_fea_align = y_and['mem_fea_align']
 
         if l == 3:
             y = y.view(s[0], s[2], s[1])
@@ -98,7 +100,7 @@ class MemModule(nn.Module):
             y = x
             att = att
             print('wrong feature map size')
-        return {'output': y, 'att': att}
+        return {'output': y, 'att': att, 'mem_fea_align': mem_fea_align}
 
 # relu based hard shrinkage function, only works for positive values
 def hard_shrink_relu(input, lambd=0, epsilon=1e-12):
