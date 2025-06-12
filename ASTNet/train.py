@@ -318,11 +318,12 @@ def train(config, train_loader, model, loss_functions, optimizer, epoch, logger)
             
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
                   'Lr {lr:.6f}\t' \
-                  '[L2 {l2:.4f} + Contrastive_Proj {contrastive:.4f} + KL {kl:.4f}]\t' \
+                  '[Inte {inte:.4f} + L2 {l2:.4f} + Contrastive_Proj {contrastive:.4f} + KL {kl:.4f}]\t' \
                   'PSNR {psnr:.2f}\t' \
                   'Att [max:{max_att:.3f}, mean:{mean_att:.3f}]'.format(
                       epoch+1, i+1, len(train_loader),
                       lr=cur_lr,
+                      inte = inte_loss,
                       l2=l2_loss, 
                       contrastive=contrastive_loss, 
                       kl=kl_loss, 
