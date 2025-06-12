@@ -102,7 +102,7 @@ class ASTNet(nn.Module):
         self.tsm_left = TemporalShift(n_segment=4, n_div=16, direction='left')
 
         # Memory module with reduced dimensions
-        self.mem_rep8 = MemModule(mem_dim=100, fea_dim=efficient_channels[1], shrink_thres=0.0025)  # Reduce memory slots
+        self.mem_rep8 = MemModule(mem_dim=200, fea_dim=efficient_channels[1], shrink_thres=0.0025) 
         
         # Efficient projection MLPs
         projection_dim = 256  # Reduced from 512
