@@ -295,7 +295,8 @@ def train(config, train_loader, model, loss_functions, optimizer, epoch, logger)
         # f8_for_decoder đã được weight bởi attention từ projection space
         # contrastive_loss được tính trong projection space  
         # decoder sử dụng original features * projection attention
-        loss = l2_loss + contrastive_loss + kl_loss + 0.0002 * entropy_loss
+        # loss = l2_loss + contrastive_loss + kl_loss + 0.0002 * entropy_loss
+        loss = inte_loss + l2_loss + contrastive_loss + kl_loss 
         
         total_loss += loss.item()
         num_batches += 1
