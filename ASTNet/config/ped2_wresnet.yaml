@@ -10,7 +10,7 @@ DATASET:
   LOWER_BOUND: 100
 
 TRAIN:
-  BATCH_SIZE_PER_GPU: 2
+  BATCH_SIZE_PER_GPU: 16
   SHUFFLE: true
   BEGIN_EPOCH: 0
   END_EPOCH: 120
@@ -24,7 +24,7 @@ TEST:
   BATCH_SIZE_PER_GPU: 1
 
 MODEL:
-  NAME: "wrn20"
+  NAME: "wrn38"
   INIT_WEIGHTS: False
   PRETRAINED: '..\..\datasets\seg_weights\wider_resnet38.pth.tar'
   IMAGE_SIZE:

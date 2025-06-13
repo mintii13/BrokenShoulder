@@ -29,10 +29,9 @@ def parse_args():
     parser.add_argument('--cfg', help='experiment configuration filename',
                         default='config/ped2_wresnet.yaml', type=str)
     parser.add_argument('--base-path', help='base path for batch testing',
-                        default='D:/FPTU-sourse/Term4/ResFes_FE/References/Anomaly Detection/Reconstruction/astnet/ASTNet/output/ped2/1mem_newloss_2000/', type=str)
+                        default='D:/FPTU-sourse/Term4/ResFes_FE/References/Anomaly Detection/Reconstruction/astnet/ASTNet/output/ped2/1mem_newloss_200/', type=str)
     parser.add_argument('--epoch-range', help='epoch range for batch testing (e.g., 32-36 or 32 for single epoch)', 
                         default='60', type=str)
-
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
@@ -87,7 +86,7 @@ def inference(config, data_loader, model, save_frames_info=None, epoch_info=None
     return psnr_list
 
 def save_frame_comparison(target_frame, predicted_frame, video_idx, frame_idx, psnr_value, base_path, epoch_info, logger):
-    """Save comparison of target and predicted frames"""
+    """Save comparison of target and predicted frames with difference heatmap"""
     try:
         # Create epoch-specific folder for comparison images
         epoch_folder_name = f"compare_image_{epoch_info}"
@@ -115,15 +114,24 @@ def save_frame_comparison(target_frame, predicted_frame, video_idx, frame_idx, p
         target_np = np.clip(target_np, 0, 1)
         predicted_np = np.clip(predicted_np, 0, 1)
         
-        # Create figure with subplots
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        # Calculate difference for heatmap
+        if len(target_np.shape) == 3:  # Color image
+            # For color images, convert to grayscale for difference calculation
+            target_gray = np.dot(target_np[...,:3], [0.2989, 0.5870, 0.1140])
+            predicted_gray = np.dot(predicted_np[...,:3], [0.2989, 0.5870, 0.1140])
+            difference = np.abs(target_gray - predicted_gray)
+        else:  # Grayscale image
+            difference = np.abs(target_np - predicted_np)
+        
+        # Create figure with 3 subplots
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         
         # Plot original frame
         if len(target_np.shape) == 3:  # Color image
             axes[0].imshow(target_np)
         else:  # Grayscale image
             axes[0].imshow(target_np, cmap='gray')
-        axes[0].set_title(f'Original Frame\nVideo {video_idx+1}, Frame {frame_idx}, {epoch_info}')
+        axes[0].set_title(f'Original Frame\nVideo {video_idx+1}, Frame {frame_idx}')
         axes[0].axis('off')
         
         # Plot predicted frame
@@ -131,20 +139,28 @@ def save_frame_comparison(target_frame, predicted_frame, video_idx, frame_idx, p
             axes[1].imshow(predicted_np)
         else:  # Grayscale image
             axes[1].imshow(predicted_np, cmap='gray')
-        axes[1].set_title(f'Predicted Frame\nPSNR: {psnr_value:.2f}, {epoch_info}')
+        axes[1].set_title(f'Predicted Frame\nPSNR: {psnr_value:.2f}')
         axes[1].axis('off')
         
+        # Plot difference heatmap
+        im = axes[2].imshow(difference, cmap='hot', interpolation='nearest')
+        axes[2].set_title(f'Difference Heatmap\n(Brighter = More Different)')
+        axes[2].axis('off')
+        
+        # Add colorbar for heatmap
+        plt.colorbar(im, ax=axes[2], fraction=0.046, pad=0.04)
+        
         # Add main title
-        plt.suptitle(f'Frame Comparison Video {video_idx+1} Frame {frame_idx} - {epoch_info}', fontsize=16)
+        plt.suptitle(f'Frame Analysis: Video {video_idx+1} Frame {frame_idx} - {epoch_info}', fontsize=16)
         plt.tight_layout()
         
         # Save figure in epoch-specific folder
-        filename = f'FRAME_COMPARISON_video{video_idx+1}_frame{frame_idx}_psnr{psnr_value:.2f}.png'
+        filename = f'FRAME_HEATMAP_video{video_idx+1}_frame{frame_idx}_psnr{psnr_value:.2f}.png'
         save_path = os.path.join(epoch_folder_path, filename)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
         
-        logger.info(f'Saved frame comparison to: {save_path}')
+        logger.info(f'Saved frame comparison with heatmap to: {save_path}')
         
     except Exception as e:
         logger.error(f'Error saving frame comparison: {str(e)}')
